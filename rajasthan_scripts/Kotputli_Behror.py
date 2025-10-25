@@ -17,7 +17,7 @@ EXCEL_PATH = r"C:\Users\Ritika Sharma\OneDrive - JK LAKSHMIPAT UNIVERSITY\Major_
 
 # State and District to process
 STATE_NAME = "Rajasthan"
-DISTRICT_NAME = "KOTHPUTLI BEHROR"
+DISTRICT_NAME = "KOTPUTLI BEHROR"
 
 def setup_driver():
     chrome_options = Options()
@@ -84,10 +84,13 @@ def extract_data(driver, name):
 
         # --- Table cards ---
         table_cards = [
-            "Instituted in last month", "Disposal in last month",
-            "Contested", "Uncontested",
-            "Cases Listed Today", "Undated", "Excessive Dated Cases",
-            "Cases Filed By Woman", "Cases Filed By Senior Citizen"
+            "Instituted in last month",
+            "Disposal in last month",
+            "Cases Listed Today",
+            "Undated",
+            "Excessive Dated Cases",
+            "Cases Filed By Woman",
+            "Cases Filed By Senior Citizen"
         ]
 
         for case_type in table_cards:
@@ -95,31 +98,55 @@ def extract_data(driver, name):
                 section = wait.until(EC.presence_of_element_located(
                     (By.XPATH, f"//span[contains(text(), '{case_type}')]/ancestor::div[contains(@class,'card')]")
                 ))
-                cells = section.find_elements(By.XPATH, ".//table//tr[2]/td")
+                # Handle “Disposal in last month” specially (it contains contested & uncontested)
+                if case_type == "Disposal in last month":
+                    rows = section.find_elements(By.XPATH, ".//table//tr")
+                    nums = []
+                    for tr in rows:
+                        tds = tr.find_elements(By.XPATH, ".//td/span[contains(@class,'h4')]")
+                        if len(tds) == 3:
+                            vals = [td.text.strip().replace(",", "") or "0" for td in tds]
+                            nums.append(vals)
 
-                vals = []
-                for td in cells[:3]:
-                    raw = td.text.strip()
-                    if not raw:
-                        try:
-                            raw = td.find_element(By.XPATH, ".//span|.//a").text.strip()
-                        except:
-                            raw = "0"
-                    vals.append(raw.replace(",", "") if raw else "0")
+                    # Expected order: main disposal, contested, uncontested
+                    main_disposal = nums[0] if len(nums) > 0 else ["0","0","0"]
+                    contested = nums[1] if len(nums) > 1 else ["0","0","0"]
+                    uncontested = nums[2] if len(nums) > 2 else ["0","0","0"]
 
-                while len(vals) < 3:
-                    vals.append("0")
+                    data.extend(main_disposal)
+                    data.extend(contested)
+                    data.extend(uncontested)
 
-                data.extend(vals[:3])
+                else:
+                    # Normal extraction for all other sections
+                    cells = section.find_elements(By.XPATH, ".//table//tr[2]/td")
+                    vals = []
+                    for td in cells[:3]:
+                        raw = td.text.strip()
+                        if not raw:
+                            try:
+                                raw = td.find_element(By.XPATH, ".//span|.//a").text.strip()
+                            except:
+                                raw = "0"
+                        vals.append(raw.replace(",", "") if raw else "0")
+
+                    while len(vals) < 3:
+                        vals.append("0")
+                    data.extend(vals[:3])
 
             except:
-                data.extend(["0"] * 3)
+                # If section missing, fill with zeros
+                if case_type == "Disposal in last month":
+                    data.extend(["0"] * 9)  # main + contested + uncontested
+                else:
+                    data.extend(["0"] * 3)
 
     except Exception as e:
         print(f"Error extracting {name}: {e}")
         return None
 
     return data
+
 
 def process_district(state, district, excel_path):
     driver = setup_driver()

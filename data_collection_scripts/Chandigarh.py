@@ -12,11 +12,12 @@ from datetime import datetime
 # Path to ChromeDriver
 PATH = r"C:/Users/Ritika Sharma/OneDrive - JK LAKSHMIPAT UNIVERSITY/Major_project/chromedriver.exe"
 
-# Single Excel File for All States
+# Excel File
 EXCEL_PATH = r"C:\Users\Ritika Sharma\OneDrive - JK LAKSHMIPAT UNIVERSITY\Major_project\NJDG-Data-Extration-and-Analysis\data_collection_scripts\States.xlsx"
 
-# State name to process
+# State and District to process
 STATE_NAME = "Chandigarh"
+# DISTRICT_NAME = "Ajmer"
 
 def setup_driver():
     chrome_options = Options()
@@ -24,8 +25,8 @@ def setup_driver():
     service = Service(PATH)
     return webdriver.Chrome(service=service, options=chrome_options)
 
-def save_to_excel(excel_path, state, data):
-    """Save data to specific state sheet in States.xlsx"""
+def save_to_excel(excel_path, sheet, data):
+    """Save data to specific sheet in Excel"""
     columns = [
         "Date and Time", "Civil Cases", "Criminal Cases", "Total Cases", "Pre-Litigation / Pre-Trial",
         "Instituted in last month - Civil", "Instituted in last month - Criminal", "Instituted in last month - Total",
@@ -44,21 +45,21 @@ def save_to_excel(excel_path, state, data):
 
     df = pd.DataFrame([data], columns=columns)
 
-    # Append to state sheet (create if not exists)
     with pd.ExcelWriter(excel_path, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
         try:
-            existing_df = pd.read_excel(excel_path, sheet_name=state)
+            existing_df = pd.read_excel(excel_path, sheet_name=sheet)
             df = pd.concat([existing_df, df], ignore_index=True)
         except Exception:
             pass
-        df.to_excel(writer, sheet_name=state, index=False)
+        df.to_excel(writer, sheet_name=sheet, index=False)
 
-def extract_data(driver, state):
+def extract_data(driver, name):
+    """Extract case data from NJDG dashboard"""
     wait = WebDriverWait(driver, 30)
     data = [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
 
     try:
-        # --- Top 4 summary cards ---
+        # --- Summary cards ---
         categories = {
             "Civil Cases": "//h4[contains(text(), 'Civil Cases')]/following-sibling::span",
             "Criminal Cases": "//h4[contains(text(), 'Criminal Cases')]/following-sibling::span",
@@ -81,12 +82,15 @@ def extract_data(driver, state):
             extracted_data.get("Pre-Litigation / Pre-Trial", "0")
         ])
 
-        # --- Table Sections (robust extraction) ---
+        # --- Table sections ---
         table_cards = [
-            "Instituted in last month", "Disposal in last month",
-            "Contested", "Uncontested",
-            "Cases Listed Today", "Undated", "Excessive Dated Cases",
-            "Cases Filed By Woman", "Cases Filed By Senior Citizen"
+            "Instituted in last month",
+            "Disposal in last month",
+            "Cases Listed Today",
+            "Undated",
+            "Excessive Dated Cases",
+            "Cases Filed By Woman",
+            "Cases Filed By Senior Citizen"
         ]
 
         for case_type in table_cards:
@@ -95,37 +99,52 @@ def extract_data(driver, state):
                     (By.XPATH, f"//span[contains(text(), '{case_type}')]/ancestor::div[contains(@class,'card')]")
                 ))
 
-                # Grab all tds from second row (Civil/Criminal/Total)
-                cells = section.find_elements(By.XPATH, ".//table//tr[2]/td")
+                # --- Special handling for “Disposal in last month” ---
+                if case_type == "Disposal in last month":
+                    rows = section.find_elements(By.XPATH, ".//table//tr[td/span[contains(@class,'h4')]]")
+                    nums = []
+                    for tr in rows:
+                        spans = tr.find_elements(By.XPATH, ".//td/span[contains(@class,'h4')]")
+                        if len(spans) == 3:
+                            vals = [s.text.strip().replace(",", "") or "0" for s in spans]
+                            nums.append(vals)
 
-                vals = []
-                for td in cells[:3]:
-                    # Collect inner text from span, a, or td
-                    raw = td.text.strip()
-                    if not raw:
+                    # Assign properly by pattern order
+                    main_disposal = nums[0] if len(nums) >= 1 else ["0","0","0"]
+                    contested = nums[1] if len(nums) >= 2 else ["0","0","0"]
+                    uncontested = nums[2] if len(nums) >= 3 else ["0","0","0"]
+
+                    data.extend(main_disposal)
+                    data.extend(contested)
+                    data.extend(uncontested)
+
+                else:
+                    # Generic 3-cell extraction for other tables
+                    cells = section.find_elements(By.XPATH, ".//table//tr[2]/td")
+                    vals = []
+                    for td in cells[:3]:
                         try:
-                            raw = td.find_element(By.XPATH, ".//span|.//a").text.strip()
+                            raw = td.text.strip() or td.find_element(By.XPATH, ".//span|.//a").text.strip()
                         except:
                             raw = "0"
-                    vals.append(raw.replace(",", "") if raw else "0")
+                        vals.append(raw.replace(",", "") if raw else "0")
 
-                while len(vals) < 3:
-                    vals.append("0")
+                    while len(vals) < 3:
+                        vals.append("0")
+                    data.extend(vals)
 
-                data.extend(vals[:3])
-
-            except Exception as e:
-                print(f"⚠️ Missing {case_type} for {state}: {e}")
-                data.extend(["0"] * 3)
+            except:
+                # If missing or layout error
+                if case_type == "Disposal in last month":
+                    data.extend(["0"] * 9)
+                else:
+                    data.extend(["0"] * 3)
 
     except Exception as e:
-        print(f" Error extracting state data for {state}: {e}")
+        print(f"Error extracting {name}: {e}")
         return None
 
     return data
-
-
-
 
 def process_state(state, excel_path):
     driver = setup_driver()
