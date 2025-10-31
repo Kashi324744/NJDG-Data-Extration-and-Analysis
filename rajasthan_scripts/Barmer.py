@@ -17,7 +17,7 @@ EXCEL_PATH = r"C:\Users\Ritika Sharma\OneDrive - JK LAKSHMIPAT UNIVERSITY\Major_
 
 # State and District to process
 STATE_NAME = "Rajasthan"
-DISTRICT_NAME = "Barmer"
+DISTRICT_NAME = "BARMER"
 
 def setup_driver():
     chrome_options = Options()
